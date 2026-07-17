@@ -20,11 +20,20 @@ from env vars or storage. See README.md for user-facing setup.
 - `lib/mdv2.ts` - `escapeMarkdownV2()` helper (not used by tools directly, but
   exported for callers who want to send literal text safely).
 
+Bots can't browse arbitrary chat history - they only see messages that
+arrive after they start looking. `get_updates` wraps Telegram's `getUpdates`
+and filters to the configured `chat`; `get_file` resolves a `file_id` from
+those updates to actual bytes via `downloadFile()` in `lib/telegram.ts`.
+
 ## Conventions
 
-- Every tool returns `{ content: [{type:"text", text}], isError? }` -
-  Telegram API errors are turned into readable text (`Telegram error <code>:
-  <description>`), never thrown as raw exceptions.
+- Every tool returns `{ content: [{type:"text", text}], isError? }` (or
+  `type:"image"` for `get_file` on image mimes) - Telegram API errors are
+  turned into readable text (`Telegram error <code>: <description>`), never
+  thrown as raw exceptions.
+- Every tool has an `annotations` object (`READ_ONLY`/`WRITE`/`DESTRUCTIVE`
+  presets in `route.ts`) per the MCP tool annotations spec - `readOnlyHint`
+  for read tools, `destructiveHint` only for `delete_message`.
 - New "send" tools should support `reply_to_message_id` and
   `disable_notification` where the Bot API allows it, and `parse_mode` where
   there's a text/caption field.
@@ -34,7 +43,8 @@ from env vars or storage. See README.md for user-facing setup.
 ## Adding a new Bot API method
 
 1. Add a `server.registerTool(...)` call in `route.ts` (reuse `mediaTool()`
-   helper if it's a media-send method).
+   helper if it's a media-send method), with one of the `READ_ONLY`/`WRITE`/
+   `DESTRUCTIVE` annotation presets spread in.
 2. If it can fail on bad formatting, route it through `callApi`/`callApiWithMedia`
    so the plain-text fallback applies.
 3. Update the tool list in README.md.

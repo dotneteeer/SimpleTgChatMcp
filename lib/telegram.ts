@@ -160,3 +160,70 @@ export async function callApiWithMedia(
 
   return { ok: false, text: describeError(body) };
 }
+
+const EXT_MIME: Record<string, string> = {
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  xml: "application/xml",
+  html: "text/html",
+  pdf: "application/pdf",
+  zip: "application/zip",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+};
+
+function guessMime(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return EXT_MIME[ext] ?? "application/octet-stream";
+}
+
+export interface DownloadedFile {
+  ok: boolean;
+  text: string;
+  filename?: string;
+  mime?: string;
+  size?: number;
+  base64?: string;
+}
+
+// Resolves a file_id to its bytes via getFile + the Bot API file endpoint.
+// Telegram limits bot file downloads to 20 MB.
+export async function downloadFile(token: string, fileId: string): Promise<DownloadedFile> {
+  const meta = await callApi(token, "getFile", { file_id: fileId });
+  if (!meta.ok) return { ok: false, text: meta.text };
+
+  const filePath: string | undefined = (meta.raw as any)?.file_path;
+  if (!filePath) return { ok: false, text: "Telegram did not return a file_path for this file_id." };
+
+  let res: Response;
+  try {
+    res = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  } catch (err: any) {
+    return { ok: false, text: `Network error downloading file: ${err.message ?? err}` };
+  }
+  if (!res.ok) return { ok: false, text: `Failed to download file: HTTP ${res.status}` };
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  const mime = guessMime(filePath);
+  const filename = filePath.split("/").pop() ?? filePath;
+
+  return {
+    ok: true,
+    text: "OK",
+    filename,
+    mime,
+    size: buf.length,
+    base64: buf.toString("base64"),
+  };
+}

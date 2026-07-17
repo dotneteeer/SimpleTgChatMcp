@@ -1,6 +1,6 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { callApi, callApiWithMedia, type MediaInput } from "@/lib/telegram";
+import { callApi, callApiWithMedia, downloadFile, type MediaInput } from "@/lib/telegram";
 
 export const maxDuration = 60;
 
@@ -30,6 +30,12 @@ const commonSendFields = {
   disable_notification: z.boolean().optional(),
 };
 
+// MCP tool annotation presets - see https://modelcontextprotocol.io for the spec.
+// These describe tool behavior (not the Anthropic Connectors Directory, which is unrelated).
+const READ_ONLY = { annotations: { readOnlyHint: true, destructiveHint: false } };
+const WRITE = { annotations: { readOnlyHint: false, destructiveHint: false } };
+const DESTRUCTIVE = { annotations: { readOnlyHint: false, destructiveHint: true } };
+
 function toResult(r: { ok: boolean; text: string }) {
   return {
     content: [{ type: "text" as const, text: r.text }],
@@ -45,6 +51,41 @@ function clean<T extends Record<string, unknown>>(obj: T): Record<string, unknow
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 }
 
+// Trims an update object down to the fields that matter for reading messages/files.
+function summarizeUpdate(u: any) {
+  const m = u.message ?? u.channel_post ?? u.edited_message;
+  if (!m) return { update_id: u.update_id, raw: u };
+
+  const media: Record<string, unknown> = {};
+  if (m.document) media.document = { file_id: m.document.file_id, file_name: m.document.file_name, mime_type: m.document.mime_type, file_size: m.document.file_size };
+  if (m.photo?.length) media.photo = { file_id: m.photo[m.photo.length - 1].file_id, file_size: m.photo[m.photo.length - 1].file_size };
+  if (m.video) media.video = { file_id: m.video.file_id, mime_type: m.video.mime_type, file_size: m.video.file_size };
+  if (m.audio) media.audio = { file_id: m.audio.file_id, mime_type: m.audio.mime_type, file_size: m.audio.file_size };
+  if (m.voice) media.voice = { file_id: m.voice.file_id, mime_type: m.voice.mime_type, file_size: m.voice.file_size };
+  if (m.animation) media.animation = { file_id: m.animation.file_id, mime_type: m.animation.mime_type, file_size: m.animation.file_size };
+  if (m.video_note) media.video_note = { file_id: m.video_note.file_id, file_size: m.video_note.file_size };
+  if (m.sticker) media.sticker = { file_id: m.sticker.file_id, emoji: m.sticker.emoji };
+
+  const extras: Record<string, unknown> = {};
+  if (m.location) extras.location = { latitude: m.location.latitude, longitude: m.location.longitude };
+  if (m.venue) extras.venue = { title: m.venue.title, address: m.venue.address, location: m.venue.location };
+  if (m.contact) extras.contact = { phone_number: m.contact.phone_number, first_name: m.contact.first_name, last_name: m.contact.last_name };
+  if (m.poll) extras.poll = { question: m.poll.question, options: m.poll.options?.map((o: any) => ({ text: o.text, voter_count: o.voter_count })) };
+  if (m.dice) extras.dice = { emoji: m.dice.emoji, value: m.dice.value };
+  if (m.reply_to_message) extras.reply_to_message_id = m.reply_to_message.message_id;
+
+  return {
+    update_id: u.update_id,
+    message_id: m.message_id,
+    date: m.date,
+    from: m.from ? { id: m.from.id, username: m.from.username, first_name: m.from.first_name } : undefined,
+    text: m.text,
+    caption: m.caption,
+    ...(Object.keys(media).length ? { media } : {}),
+    ...extras,
+  };
+}
+
 // --- Route handler ------------------------------------------------------------
 
 async function buildHandler(token: string, chat: string) {
@@ -53,6 +94,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "get_me",
         {
+          ...READ_ONLY,
           title: "Get Bot Info",
           description: "Verify the bot token works and return basic bot info.",
           inputSchema: {},
@@ -61,8 +103,77 @@ async function buildHandler(token: string, chat: string) {
       );
 
       server.registerTool(
+        "get_updates",
+        {
+          ...READ_ONLY,
+          title: "Get Updates",
+          description:
+            "Read messages sent to the bot (only from the configured chat). Bots can only see messages " +
+            "that arrived after they started looking, so call this to check for new incoming messages/files. " +
+            "Pass 'offset' as (last update_id seen + 1) to avoid seeing the same updates again; omit it to " +
+            "see everything Telegram still has queued.",
+          inputSchema: {
+            offset: z.number().int().optional(),
+            limit: z.number().int().min(1).max(100).optional(),
+          },
+        },
+        async ({ offset, limit }) => {
+          const result = await callApi(token, "getUpdates", clean({ offset, limit, timeout: 0 }));
+          if (!result.ok) return toResult(result);
+          const updates = (result.raw as any[])
+            .filter((u) => {
+              const m = u.message ?? u.channel_post ?? u.edited_message;
+              return m && String(m.chat?.id) === String(chat);
+            })
+            .map(summarizeUpdate);
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(updates, null, 2) }],
+          };
+        }
+      );
+
+      server.registerTool(
+        "get_file",
+        {
+          ...READ_ONLY,
+          title: "Get File",
+          description:
+            "Download a file previously seen via get_updates (by file_id) and return its content. " +
+            "Text-like files are returned as readable text, images are returned as viewable images, " +
+            "everything else is returned as base64. Telegram limits bot downloads to 20 MB.",
+          inputSchema: { file_id: z.string() },
+        },
+        async ({ file_id }) => {
+          const file = await downloadFile(token, file_id);
+          if (!file.ok) return toResult(file);
+
+          const mime = file.mime ?? "application/octet-stream";
+          if (mime.startsWith("image/")) {
+            return {
+              content: [{ type: "image" as const, data: file.base64!, mimeType: mime }],
+            };
+          }
+          if (mime.startsWith("text/") || mime === "application/json" || mime === "application/xml") {
+            const text = Buffer.from(file.base64!, "base64").toString("utf-8");
+            return {
+              content: [{ type: "text" as const, text: `File: ${file.filename} (${mime})\n\n${text}` }],
+            };
+          }
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `File: ${file.filename} (${mime}, ${file.size} bytes). Not directly readable as text - base64 content:\n\n${file.base64}`,
+              },
+            ],
+          };
+        }
+      );
+
+      server.registerTool(
         "send_message",
         {
+          ...WRITE,
           title: "Send Message",
           description: "Send a text message to the configured chat.",
           inputSchema: {
@@ -98,6 +209,7 @@ async function buildHandler(token: string, chat: string) {
         server.registerTool(
           name,
           {
+            ...WRITE,
             title,
             description,
             inputSchema: {
@@ -156,6 +268,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "send_media_group",
         {
+          ...WRITE,
           title: "Send Media Group",
           description: "Send an album of 2-10 photos/videos in one message.",
           inputSchema: {
@@ -191,6 +304,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "send_location",
         {
+          ...WRITE,
           title: "Send Location",
           description: "Send a geographic location to the configured chat.",
           inputSchema: {
@@ -212,6 +326,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "send_venue",
         {
+          ...WRITE,
           title: "Send Venue",
           description: "Send a venue (location with a name/address) to the configured chat.",
           inputSchema: {
@@ -243,6 +358,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "send_contact",
         {
+          ...WRITE,
           title: "Send Contact",
           description: "Send a contact card to the configured chat.",
           inputSchema: {
@@ -272,6 +388,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "send_poll",
         {
+          ...WRITE,
           title: "Send Poll",
           description: "Send a poll to the configured chat.",
           inputSchema: {
@@ -310,6 +427,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "send_dice",
         {
+          ...WRITE,
           title: "Send Dice",
           description: "Send an animated dice/emoji roll (dice, dart, basketball, football, bowling, slot machine).",
           inputSchema: {
@@ -330,6 +448,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "send_chat_action",
         {
+          ...WRITE,
           title: "Send Chat Action",
           description: "Show a transient status like 'typing' or 'uploading photo' in the chat.",
           inputSchema: {
@@ -354,6 +473,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "edit_message_text",
         {
+          ...WRITE,
           title: "Edit Message Text",
           description: "Edit the text of a previously sent message.",
           inputSchema: {
@@ -375,6 +495,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "edit_message_caption",
         {
+          ...WRITE,
           title: "Edit Message Caption",
           description: "Edit the caption of a previously sent media message.",
           inputSchema: {
@@ -396,6 +517,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "delete_message",
         {
+          ...DESTRUCTIVE,
           title: "Delete Message",
           description: "Delete a message from the configured chat.",
           inputSchema: { message_id: z.number().int() },
@@ -406,6 +528,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "pin_message",
         {
+          ...WRITE,
           title: "Pin Message",
           description: "Pin a message in the configured chat.",
           inputSchema: {
@@ -422,6 +545,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "unpin_message",
         {
+          ...WRITE,
           title: "Unpin Message",
           description: "Unpin a specific message (or the most recent pinned message if no id is given).",
           inputSchema: { message_id: z.number().int().optional() },
@@ -433,6 +557,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "unpin_all_messages",
         {
+          ...WRITE,
           title: "Unpin All Messages",
           description: "Unpin every pinned message in the configured chat.",
           inputSchema: {},
@@ -443,6 +568,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "forward_message",
         {
+          ...WRITE,
           title: "Forward Message",
           description: "Forward a message from another chat into the configured chat.",
           inputSchema: {
@@ -464,6 +590,7 @@ async function buildHandler(token: string, chat: string) {
       server.registerTool(
         "copy_message",
         {
+          ...WRITE,
           title: "Copy Message",
           description: "Copy a message from another chat into the configured chat (no forward-from link shown).",
           inputSchema: {

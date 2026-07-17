@@ -109,6 +109,22 @@ it has nothing to do with `--transport` itself, it's a separate argument.
 unescaped special characters), the server automatically retries the send as
 plain text so the message still goes through, and tells you it fell back.
 
+Tools are also annotated per the [MCP tool annotations spec](https://modelcontextprotocol.io)
+(`readOnlyHint`/`destructiveHint`) so clients can show which are safe to run
+freely versus which change or remove data - this is a core protocol feature,
+available to any MCP server, and unrelated to Anthropic's Connectors
+Directory (a separate, optional public listing process).
+
+### Reading
+
+Bots only see messages that arrive *after* they start looking - there's no
+API to browse arbitrary chat history. `get_updates` returns the messages
+Telegram still has queued for the bot; call it whenever you want to check
+for new incoming text, files, locations, polls, etc.
+
+- **`get_updates`** - `offset` (number, optional - pass last `update_id` + 1 to avoid re-seeing old messages), `limit` (number, optional, 1-100). Returns each message's text/caption, sender, and metadata for any attached media, location, venue, contact, poll, dice, or sticker (with `file_id` where applicable).
+- **`get_file`** - `file_id` (required, from a `get_updates` result). Downloads the file: images come back viewable, text-like files (txt/md/csv/json/xml) come back as readable text, everything else comes back as base64 (Telegram caps bot downloads at 20 MB).
+
 ### Sending
 
 - **`get_me`** - no parameters. Checks that your bot token is valid and reachable.
