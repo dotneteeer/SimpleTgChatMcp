@@ -1,5 +1,9 @@
 # SimpleTgChatMcp
 
+[![CI](https://github.com/dotneteeer/SimpleTgChatMcp/actions/workflows/ci.yml/badge.svg)](https://github.com/dotneteeer/SimpleTgChatMcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/dotneteeer/SimpleTgChatMcp)](https://github.com/dotneteeer/SimpleTgChatMcp/releases)
+
 A remote **MCP (Model Context Protocol) server** that lets Claude send
 messages, photos, documents, and other media to a Telegram chat through the
 Telegram Bot API - and manage those messages (edit, delete, pin, forward).
