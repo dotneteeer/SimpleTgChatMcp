@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/dotneteeer/SimpleTgChatMcp/actions/workflows/ci.yml/badge.svg)](https://github.com/dotneteeer/SimpleTgChatMcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/dotneteeer/SimpleTgChatMcp)](https://github.com/dotneteeer/SimpleTgChatMcp/releases)
 
 A remote **MCP (Model Context Protocol) server** that lets Claude send
 messages, photos, documents, and other media to a Telegram chat through the
@@ -83,40 +82,61 @@ send messages through your bot.
 
 **Claude.ai / Claude Desktop**
 1. Go to **Settings -> Connectors -> Add custom connector**.
-2. Paste your connector URL from Step 3.
-3. Save. Claude can now call the Telegram tools in any conversation.
+2. Give it a **name**, e.g. `Telegram`.
+3. Paste your connector URL from Step 3 into the URL field.
+4. Save. Claude can now call the Telegram tools in any conversation.
 
 **Claude Code (CLI)**
 ```
 claude mcp add --transport http tg "https://simple-tg-chat-mcp.vercel.app/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>"
 ```
+Here `--transport http` selects the HTTP transport; `tg` is just the local
+name this server will be registered under (pick anything, e.g. `telegram`) -
+it has nothing to do with `--transport` itself, it's a separate argument.
 
 **Verify it's working**: ask Claude to use the `get_me` tool, or just say
 "send a test message to Telegram" - you should see it show up in your chat.
 
 ## Available tools
 
-**Sending**
-`send_message`, `send_photo`, `send_document`, `send_video`, `send_audio`,
-`send_voice`, `send_animation`, `send_media_group` (albums), `send_location`,
-`send_venue`, `send_contact`, `send_poll`, `send_dice`, `send_chat_action`.
-
-**Managing**
-`edit_message_text`, `edit_message_caption`, `delete_message`, `pin_message`,
-`unpin_message`, `unpin_all_messages`, `forward_message`, `copy_message`.
-
-**Utility**
-`get_me` - checks that your bot token is valid and reachable.
-
-Photo/document/video/audio/voice/animation tools accept `media` as one of:
+`media` (used by several tools below) accepts one of:
 - `{ "url": "https://..." }` - Telegram fetches the file itself
 - `{ "base64": "...", "filename": "...", "mime": "..." }` - raw file bytes, uploaded directly
 - `{ "file_id": "..." }` - reuse a file Telegram already has
 
-Text and captions default to **MarkdownV2** formatting. If Telegram rejects
-the formatting (e.g. unescaped special characters), the server automatically
-retries the send as plain text so the message still goes through, and tells
-you it fell back.
+`parse_mode` (used by several tools below) is one of `MarkdownV2` (default),
+`HTML`, `Markdown`, `none`. If Telegram rejects the formatting (e.g.
+unescaped special characters), the server automatically retries the send as
+plain text so the message still goes through, and tells you it fell back.
+
+### Sending
+
+- **`get_me`** - no parameters. Checks that your bot token is valid and reachable.
+- **`send_message`** - `text` (string, required), `parse_mode`, `reply_to_message_id` (number), `disable_notification` (boolean)
+- **`send_photo`** - `media` (required), `caption` (string), `parse_mode`, `reply_to_message_id`, `disable_notification`
+- **`send_document`** - same parameters as `send_photo`
+- **`send_video`** - same parameters as `send_photo`
+- **`send_audio`** - same parameters as `send_photo`
+- **`send_voice`** - `media` (required), `reply_to_message_id`, `disable_notification` (no caption/parse_mode - voice notes don't support them)
+- **`send_animation`** - same parameters as `send_photo`
+- **`send_media_group`** - `items` (array of 2-10 `{ type: "photo"|"video", url, caption? }`, required), `parse_mode`, `reply_to_message_id`, `disable_notification`
+- **`send_location`** - `latitude` (number, required), `longitude` (number, required), `reply_to_message_id`, `disable_notification`
+- **`send_venue`** - `latitude`, `longitude`, `title`, `address` (all required), `reply_to_message_id`, `disable_notification`
+- **`send_contact`** - `phone_number` (required), `first_name` (required), `last_name`, `reply_to_message_id`, `disable_notification`
+- **`send_poll`** - `question` (required), `options` (array of 2-10 strings, required), `is_anonymous` (boolean), `allows_multiple_answers` (boolean), `reply_to_message_id`, `disable_notification`
+- **`send_dice`** - `emoji` (one of `🎲` `🎯` `🏀` `⚽` `🎳` `🎰`, default `🎲`), `reply_to_message_id`, `disable_notification`
+- **`send_chat_action`** - `action` (required, one of `typing`, `upload_photo`, `record_video`, `upload_video`, `record_voice`, `upload_voice`, `upload_document`, `choose_sticker`, `find_location`, `record_video_note`, `upload_video_note`)
+
+### Managing
+
+- **`edit_message_text`** - `message_id` (number, required), `text` (required), `parse_mode`
+- **`edit_message_caption`** - `message_id` (required), `caption` (required), `parse_mode`
+- **`delete_message`** - `message_id` (required)
+- **`pin_message`** - `message_id` (required), `disable_notification` (boolean)
+- **`unpin_message`** - `message_id` (optional - unpins the most recent pinned message if omitted)
+- **`unpin_all_messages`** - no parameters
+- **`forward_message`** - `from_chat_id` (required), `message_id` (required), `disable_notification` (boolean)
+- **`copy_message`** - `from_chat_id` (required), `message_id` (required), `disable_notification` (boolean)
 
 Errors from Telegram (invalid token, rate limits, bad chat id, etc.) come
 back as a readable message like `Telegram error 400: chat not found`, never
