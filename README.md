@@ -88,11 +88,13 @@ send messages through your bot.
 
 **Claude Code (CLI)**
 ```
-claude mcp add --transport http Telegram "https://simple-tg-chat-mcp.vercel.app/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>"
+claude mcp add --transport http -s user Telegram "https://simple-tg-chat-mcp.vercel.app/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>"
 ```
-Here `--transport http` selects the HTTP transport; `Telegram` is just the
-local name this server will be registered under (pick anything you like) -
-it has nothing to do with `--transport` itself, it's a separate argument.
+Here `--transport http` selects the HTTP transport; `-s user` registers it
+globally (available in every project) instead of just the current one;
+`Telegram` is just the local name this server will be registered under (pick
+anything you like) - it has nothing to do with `--transport` itself, it's a
+separate argument.
 
 **Verify it's working**: ask Claude to use the `get_me` tool, or just say
 "send a test message to Telegram" - you should see it show up in your chat.

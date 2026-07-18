@@ -77,7 +77,7 @@ export default function Home() {
     return `${BASE_URL}/api/mcp?token=${t}&chat=${c}`;
   }, [token, chat]);
 
-  const claudeCodeCmd = `claude mcp add --transport http Telegram "${url}"`;
+  const claudeCodeCmd = `claude mcp add --transport http -s user Telegram "${url}"`;
 
   return (
     <>
