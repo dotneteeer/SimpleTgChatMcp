@@ -16,6 +16,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   );
   const entry = getUpload(id);
   if (!entry) {
+    console.log(`[file-fetch] ${id} -> 404 not found/expired`);
     return new Response("Not found or expired.", { status: 404 });
   }
 
@@ -31,6 +32,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       const end = match[2] ? parseInt(match[2], 10) : total - 1;
       if (start <= end && end < total) {
         const slice = entry.bytes.subarray(start, end + 1);
+        console.log(`[file-fetch] ${id} -> 206 bytes ${start}-${end}/${total} mime=${entry.mime}`);
         return new Response(new Uint8Array(slice), {
           status: 206,
           headers: {
@@ -41,6 +43,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           },
         });
       }
+      console.log(`[file-fetch] ${id} -> 416 range not satisfiable (${range}, total=${total})`);
       return new Response(null, {
         status: 416,
         headers: { "Content-Range": `bytes */${total}`, "Accept-Ranges": "bytes" },
@@ -48,6 +51,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
+  console.log(`[file-fetch] ${id} -> 200 total=${total} mime=${entry.mime} filename=${entry.filename}`);
   return new Response(new Uint8Array(entry.bytes), {
     headers: {
       "Content-Type": entry.mime,
