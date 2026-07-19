@@ -220,7 +220,7 @@ async function buildHandler(token: string, chat: string, req: Request) {
         {
           ...WRITE,
           title: "Send Message",
-          description: "Send a text message to the configured chat.",
+          description: "Send a text message to the configured chat. Max 4096 characters.",
           inputSchema: {
             text: z.string(),
             parse_mode: parseModeSchema,
@@ -257,7 +257,9 @@ async function buildHandler(token: string, chat: string, req: Request) {
             ...WRITE,
             title,
             description:
-              `${description} For files over ~300 KB, don't use base64 - run ` +
+              `${description}` +
+              (withCaption ? " Caption max 1024 characters." : "") +
+              ` For files over ~300 KB, don't use base64 - run ` +
               `\`curl -F file=@<local-path> "${uploadUrl}"\` and pass the returned URL via 'media.url' instead.`,
             inputSchema: {
               media: mediaInputSchema,
@@ -302,30 +304,49 @@ async function buildHandler(token: string, chat: string, req: Request) {
         );
       };
 
-      mediaTool("send_photo", "sendPhoto", "photo", "Send Photo", "Send a photo to the configured chat.");
+      mediaTool(
+        "send_photo",
+        "sendPhoto",
+        "photo",
+        "Send Photo",
+        "Send a photo to the configured chat. Telegram rejects photos where width + height exceeds " +
+          "~10,000px or the aspect ratio exceeds 20:1, and caps size at 10 MB - use send_document instead " +
+          "if you need to preserve full resolution/size."
+      );
       mediaTool(
         "send_document",
         "sendDocument",
         "document",
         "Send Document",
-        "Send a file/document to the configured chat."
+        "Send a file/document to the configured chat. Max 50 MB."
       );
-      mediaTool("send_video", "sendVideo", "video", "Send Video", "Send a video to the configured chat.");
-      mediaTool("send_audio", "sendAudio", "audio", "Send Audio", "Send an audio file to the configured chat.");
+      mediaTool(
+        "send_video",
+        "sendVideo",
+        "video",
+        "Send Video",
+        "Send a video to the configured chat. Max 50 MB."
+      );
+      mediaTool(
+        "send_audio",
+        "sendAudio",
+        "audio",
+        "Send Audio",
+        "Send an audio file to the configured chat. Max 50 MB."
+      );
       mediaTool(
         "send_voice",
         "sendVoice",
         "voice",
         "Send Voice",
-        "Send a voice message (ogg/opus) to the configured chat.",
-        false
+        "Send a voice message (ogg/opus) to the configured chat. Max 50 MB."
       );
       mediaTool(
         "send_animation",
         "sendAnimation",
         "animation",
         "Send Animation",
-        "Send a GIF/animation to the configured chat."
+        "Send a GIF/animation to the configured chat. Max 50 MB."
       );
 
       server.registerTool(
@@ -333,7 +354,9 @@ async function buildHandler(token: string, chat: string, req: Request) {
         {
           ...WRITE,
           title: "Send Media Group",
-          description: "Send an album of 2-10 photos/videos in one message.",
+          description:
+            "Send an album of 2-10 photos/videos in one message. Photo/video only (no documents/audio); " +
+            "caption max 1024 characters per item.",
           inputSchema: {
             items: z
               .array(
@@ -356,7 +379,11 @@ async function buildHandler(token: string, chat: string, req: Request) {
               "sendMediaGroup",
               clean({
                 chat_id: chat,
-                media: items.map((i) => clean({ ...i, parse_mode: pm(parse_mode) })),
+                // Telegram's InputMedia expects the file/url under a "media" field, not "url" -
+                // translate here so the tool's own schema can keep the clearer "url" name.
+                media: items.map((i) =>
+                  clean({ type: i.type, media: i.url, caption: i.caption, parse_mode: pm(parse_mode) })
+                ),
                 reply_to_message_id,
                 disable_notification,
               })
@@ -369,19 +396,62 @@ async function buildHandler(token: string, chat: string, req: Request) {
         {
           ...WRITE,
           title: "Send Location",
-          description: "Send a geographic location to the configured chat.",
+          description:
+            "Send a geographic location to the configured chat. Set live_period to send a live location " +
+            "that updates for that many seconds (60-86400).",
           inputSchema: {
             latitude: z.number(),
             longitude: z.number(),
+            live_period: z
+              .number()
+              .int()
+              .min(60)
+              .max(86400)
+              .optional()
+              .describe("Seconds the location stays live and updatable (60-86400), or omit for a static location."),
+            horizontal_accuracy: z.number().min(0).max(1500).optional(),
+            heading: z
+              .number()
+              .int()
+              .min(1)
+              .max(360)
+              .optional()
+              .describe("Direction of movement in degrees (1-360). Only meaningful with live_period."),
+            proximity_alert_radius: z
+              .number()
+              .int()
+              .min(1)
+              .max(100000)
+              .optional()
+              .describe("Radius in meters for proximity alerts. Only meaningful with live_period."),
             ...commonSendFields,
           },
         },
-        async ({ latitude, longitude, reply_to_message_id, disable_notification }) =>
+        async ({
+          latitude,
+          longitude,
+          live_period,
+          horizontal_accuracy,
+          heading,
+          proximity_alert_radius,
+          reply_to_message_id,
+          disable_notification,
+        }) =>
           toResult(
             await callApi(
               token,
               "sendLocation",
-              clean({ chat_id: chat, latitude, longitude, reply_to_message_id, disable_notification })
+              clean({
+                chat_id: chat,
+                latitude,
+                longitude,
+                live_period,
+                horizontal_accuracy,
+                heading,
+                proximity_alert_radius,
+                reply_to_message_id,
+                disable_notification,
+              })
             )
           )
       );
@@ -453,10 +523,10 @@ async function buildHandler(token: string, chat: string, req: Request) {
         {
           ...WRITE,
           title: "Send Poll",
-          description: "Send a poll to the configured chat.",
+          description: "Send a poll to the configured chat. Question max 300 characters, each option max 100.",
           inputSchema: {
-            question: z.string(),
-            options: z.array(z.string()).min(2).max(10),
+            question: z.string().max(300),
+            options: z.array(z.string().max(100)).min(2).max(10),
             is_anonymous: z.boolean().optional(),
             allows_multiple_answers: z.boolean().optional(),
             ...commonSendFields,
@@ -538,7 +608,7 @@ async function buildHandler(token: string, chat: string, req: Request) {
         {
           ...WRITE,
           title: "Edit Message Text",
-          description: "Edit the text of a previously sent message.",
+          description: "Edit the text of a previously sent message. Max 4096 characters.",
           inputSchema: {
             message_id: z.number().int(),
             text: z.string(),
@@ -560,7 +630,7 @@ async function buildHandler(token: string, chat: string, req: Request) {
         {
           ...WRITE,
           title: "Edit Message Caption",
-          description: "Edit the caption of a previously sent media message.",
+          description: "Edit the caption of a previously sent media message. Max 1024 characters.",
           inputSchema: {
             message_id: z.number().int(),
             caption: z.string(),

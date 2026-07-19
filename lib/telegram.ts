@@ -17,12 +17,80 @@ function apiUrl(token: string, method: string): string {
   return `https://api.telegram.org/bot${token}/${method}`;
 }
 
+// Known Telegram error descriptions mapped to actionable hints - Telegram's raw
+// text is often too terse to self-correct from (e.g. "failed to get HTTP URL
+// content" actually means the photo's dimensions exceed Telegram's limit).
+const ERROR_HINTS: { pattern: RegExp; hint: string }[] = [
+  {
+    pattern: /failed to get http url content|wrong type of the web page content|IMAGE_PROCESS_FAILED|PHOTO_INVALID_DIMENSIONS/i,
+    hint:
+      "Telegram couldn't fetch/process this photo. Two known causes: (1) the url isn't publicly " +
+      "reachable or returned a non-image response - verify it loads directly in a browser with no auth; " +
+      "(2) the photo's width + height exceeds ~10,000px or its aspect ratio exceeds 20:1 - downscale it, " +
+      "or send it with send_document instead (no dimension limit).",
+  },
+  {
+    pattern: /file is too big/i,
+    hint: "This file exceeds Telegram's send-size limit (10 MB for photos, 50 MB for other media).",
+  },
+  {
+    pattern: /message is too long|message_too_long/i,
+    hint: "Text exceeds Telegram's 4096-character limit for messages.",
+  },
+  {
+    pattern: /message caption is too long|caption_too_long/i,
+    hint: "Caption exceeds Telegram's 1024-character limit.",
+  },
+  {
+    pattern: /wrong file identifier|wrong remote file identifier|invalid file_id/i,
+    hint: "The file_id is invalid, expired, or from a different bot - fetch a fresh one via get_updates.",
+  },
+  {
+    pattern: /wrong http url|HTTP URL specified/i,
+    hint: "The url is invalid or unreachable by Telegram's servers - confirm it's publicly accessible.",
+  },
+  {
+    pattern: /chat not found/i,
+    hint: "The configured chat id is wrong, or the bot was never started in / added to that chat.",
+  },
+  {
+    pattern: /not enough rights|have no rights|need administrator/i,
+    hint: "The bot lacks permission for this action in the chat (e.g. pinning/deleting needs admin rights).",
+  },
+  {
+    pattern: /message to edit not found|message to delete not found|message to pin not found|message to unpin not found|message to forward not found|message to copy not found/i,
+    hint: "The target message_id doesn't exist, is too old, or was already deleted.",
+  },
+  {
+    pattern: /message can't be edited/i,
+    hint: "This message type/age can't be edited (e.g. too old, or a service message).",
+  },
+  {
+    pattern: /message can't be deleted/i,
+    hint: "This message can't be deleted (e.g. too old for a group without admin rights).",
+  },
+  {
+    pattern: /there is no text in the message to edit/i,
+    hint: "This message has no text field to edit - it's a media message, use edit_message_caption instead.",
+  },
+  {
+    pattern: /there is no caption in the message to edit/i,
+    hint: "This message has no caption field to edit - it's a plain text message, use edit_message_text instead.",
+  },
+  {
+    pattern: /conflict/i,
+    hint: "Another consumer (a webhook, or a second poller) is already receiving updates for this bot - getUpdates can't be used until it's removed.",
+  },
+];
+
 function describeError(body: any): string {
   const code = body?.error_code ?? "unknown";
   const desc = body?.description ?? "Unknown error";
   const retryAfter = body?.parameters?.retry_after;
   let msg = `Telegram error ${code}: ${desc}`;
   if (retryAfter) msg += ` (retry after ${retryAfter}s)`;
+  const hint = ERROR_HINTS.find((h) => h.pattern.test(desc))?.hint;
+  if (hint) msg += `\nHint: ${hint}`;
   return msg;
 }
 

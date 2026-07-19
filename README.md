@@ -132,25 +132,25 @@ for new incoming text, files, locations, polls, etc.
 ### Sending
 
 - **`get_me`** - no parameters. Checks that your bot token is valid and reachable.
-- **`send_message`** - `text` (string, required), `parse_mode`, `reply_to_message_id` (number), `disable_notification` (boolean)
-- **`send_photo`** - `media` (required), `caption` (string), `parse_mode`, `reply_to_message_id`, `disable_notification`
-- **`send_document`** - same parameters as `send_photo`
-- **`send_video`** - same parameters as `send_photo`
-- **`send_audio`** - same parameters as `send_photo`
-- **`send_voice`** - `media` (required), `reply_to_message_id`, `disable_notification` (no caption/parse_mode - voice notes don't support them)
-- **`send_animation`** - same parameters as `send_photo`
-- **`send_media_group`** - `items` (array of 2-10 `{ type: "photo"|"video", url, caption? }`, required), `parse_mode`, `reply_to_message_id`, `disable_notification`
-- **`send_location`** - `latitude` (number, required), `longitude` (number, required), `reply_to_message_id`, `disable_notification`
+- **`send_message`** - `text` (string, required, max 4096 chars), `parse_mode`, `reply_to_message_id` (number), `disable_notification` (boolean)
+- **`send_photo`** - `media` (required), `caption` (string, max 1024 chars), `parse_mode`, `reply_to_message_id`, `disable_notification`. Telegram rejects photos where width + height > ~10,000px or aspect ratio > 20:1, and caps size at 10 MB - use `send_document` to preserve full resolution/size.
+- **`send_document`** - same parameters as `send_photo` (max 50 MB, no dimension limit)
+- **`send_video`** - same parameters as `send_photo` (max 50 MB)
+- **`send_audio`** - same parameters as `send_photo` (max 50 MB)
+- **`send_voice`** - `media` (required), `caption` (string, max 1024 chars), `parse_mode`, `reply_to_message_id`, `disable_notification` (max 50 MB)
+- **`send_animation`** - same parameters as `send_photo` (max 50 MB)
+- **`send_media_group`** - `items` (array of 2-10 `{ type: "photo"|"video", url, caption? }`, required - photo/video only, no documents/audio), `parse_mode`, `reply_to_message_id`, `disable_notification`
+- **`send_location`** - `latitude` (number, required), `longitude` (number, required), `live_period` (number, 60-86400s, sends a live/updatable location), `horizontal_accuracy`, `heading`, `proximity_alert_radius`, `reply_to_message_id`, `disable_notification`
 - **`send_venue`** - `latitude`, `longitude`, `title`, `address` (all required), `reply_to_message_id`, `disable_notification`
 - **`send_contact`** - `phone_number` (required), `first_name` (required), `last_name`, `reply_to_message_id`, `disable_notification`
-- **`send_poll`** - `question` (required), `options` (array of 2-10 strings, required), `is_anonymous` (boolean), `allows_multiple_answers` (boolean), `reply_to_message_id`, `disable_notification`
+- **`send_poll`** - `question` (required, max 300 chars), `options` (array of 2-10 strings, required, max 100 chars each), `is_anonymous` (boolean), `allows_multiple_answers` (boolean), `reply_to_message_id`, `disable_notification`
 - **`send_dice`** - `emoji` (one of `🎲` `🎯` `🏀` `⚽` `🎳` `🎰`, default `🎲`), `reply_to_message_id`, `disable_notification`
 - **`send_chat_action`** - `action` (required, one of `typing`, `upload_photo`, `record_video`, `upload_video`, `record_voice`, `upload_voice`, `upload_document`, `choose_sticker`, `find_location`, `record_video_note`, `upload_video_note`)
 
 ### Managing
 
-- **`edit_message_text`** - `message_id` (number, required), `text` (required), `parse_mode`
-- **`edit_message_caption`** - `message_id` (required), `caption` (required), `parse_mode`
+- **`edit_message_text`** - `message_id` (number, required), `text` (required, max 4096 chars), `parse_mode`
+- **`edit_message_caption`** - `message_id` (required), `caption` (required, max 1024 chars), `parse_mode`
 - **`delete_message`** - `message_id` (required)
 - **`pin_message`** - `message_id` (required), `disable_notification` (boolean)
 - **`unpin_message`** - `message_id` (optional - unpins the most recent pinned message if omitted)
@@ -186,12 +186,13 @@ that connected clients receive automatically, and in each media tool's
 description as a fallback for clients that don't surface `instructions`.
 
 **Very high-resolution photos** (width + height over ~10,000px - common with
-full-size stock/camera photos) get rejected by Telegram itself with `Bad
-Request: failed to get HTTP URL content` on `send_photo`, and a similar
-`wrong type of the web page content` on `send_document` - this is Telegram's
-own media-dimension limit, confirmed by testing at the pixel level, not a
-hosting or upload-endpoint issue. Downscale the image before uploading (e.g.
-with `ffmpeg`/`imagemagick`) if you hit this.
+full-size stock/camera photos) get rejected by Telegram itself - this is
+Telegram's own media-dimension limit, confirmed by testing at the pixel level,
+not a hosting or upload-endpoint issue. `send_photo` now returns a clear hint
+about this instead of Telegram's raw `failed to get HTTP URL content` /
+`wrong type of the web page content` text. Downscale the image before
+uploading (e.g. with `ffmpeg`/`imagemagick`), or use `send_document` instead,
+if you hit this.
 
 This only works when the calling Claude can run shell commands against a
 local file. In shell-less clients (Claude.ai web/Desktop without Bash),
