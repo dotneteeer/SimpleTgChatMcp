@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 
 const REPO_URL = "https://github.com/dotneteeer/SimpleTgChatMcp";
-const BASE_URL = "https://simple-tg-chat-mcp.vercel.app";
 
 type Annotation = "read" | "write" | "destructive";
 
@@ -72,9 +71,10 @@ export default function Home() {
   const [chat, setChat] = useState("");
 
   const url = useMemo(() => {
+    const base = typeof window === "undefined" ? "" : window.location.origin;
     const t = token.trim() ? encodeURIComponent(token.trim()) : "<BOT_TOKEN>";
     const c = chat.trim() ? encodeURIComponent(chat.trim()) : "<CHAT_ID>";
-    return `${BASE_URL}/api/mcp?token=${t}&chat=${c}`;
+    return `${base}/api/mcp?token=${t}&chat=${c}`;
   }, [token, chat]);
 
   const claudeCodeCmd = `claude mcp add --transport http -s user Telegram "${url}"`;
@@ -106,7 +106,7 @@ export default function Home() {
             <div className="feature-card">
               <div className="icon">☁️</div>
               <h3>Fully remote</h3>
-              <p>Hosted on Vercel. Nothing to install or run locally.</p>
+              <p>Runs on its own server. Nothing to install or run locally.</p>
             </div>
             <div className="feature-card">
               <div className="icon">💬</div>
@@ -277,9 +277,9 @@ export default function Home() {
             GitHub repository
           </a>
           <span className="sep">·</span>
-          Built with Next.js on Vercel
+          Built with Next.js
           <span className="sep">·</span>
-          <a href={`${BASE_URL}/api/mcp`} target="_blank" rel="noreferrer">
+          <a href="/api/mcp" target="_blank" rel="noreferrer">
             /api/mcp
           </a>
         </div>

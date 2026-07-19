@@ -2,10 +2,19 @@
 
 ## What this is
 
-Remote MCP server (Next.js App Router on Vercel, `mcp-handler`) exposing
-Telegram Bot API methods for a single chat. Stateless multi-tenant: bot token
-and chat ID come from the connector's URL query params (`token`, `chat`), not
-from env vars or storage. See README.md for user-facing setup.
+Remote MCP server (Next.js App Router, `mcp-handler`) exposing Telegram Bot
+API methods for a single chat. Stateless multi-tenant: bot token and chat ID
+come from the connector's URL query params (`token`, `chat`), not from env
+vars or storage. See README.md for user-facing setup.
+
+Hosted on [Render](https://render.com) as a persistent Node server (`next
+start`), not serverless - deliberately, since serverless hosts like Vercel cap
+request bodies at ~4.5 MB, which truncates (corrupts) base64-encoded photo/
+document uploads above that size. Render's free tier has no such cap and
+auto-deploys from GitHub on push (`render.yaml`). `app/api/health/route.ts`
+exists for Render's health check and for an external keep-alive cron (avoids
+the free tier's ~15-min idle spin-down). `export const maxDuration = 60` in
+`route.ts` is a leftover Vercel-ism; Render ignores it, harmless to keep.
 
 ## Architecture
 

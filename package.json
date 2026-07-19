@@ -2,12 +2,12 @@
   "name": "simple-tg-chat-mcp",
   "version": "1.0.0",
   "private": true,
-  "description": "Remote MCP server for sending Telegram messages/files via Bot API, deployed on Vercel",
+  "description": "Remote MCP server for sending Telegram messages/files via Bot API",
   "repository": {
     "type": "git",
     "url": "https://github.com/dotneteeer/SimpleTgChatMcp.git"
   },
-  "homepage": "https://simple-tg-chat-mcp.vercel.app",
+  "homepage": "https://github.com/dotneteeer/SimpleTgChatMcp",
   "license": "MIT",
   "engines": {
     "node": ">=20"

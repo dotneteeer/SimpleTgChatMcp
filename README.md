@@ -7,8 +7,6 @@ A remote **MCP (Model Context Protocol) server** that lets Claude send
 messages, photos, documents, and other media to a Telegram chat through the
 Telegram Bot API - and manage those messages (edit, delete, pin, forward).
 
-Live instance: **https://simple-tg-chat-mcp.vercel.app/api/mcp**
-
 No sign-up, no shared account: the server is **stateless and multi-tenant**.
 Your bot token and chat ID live only in the connector URL you configure once
 in Claude - the server itself stores nothing and doesn't know who you are.
@@ -71,12 +69,14 @@ bot/group/channel first - Telegram only shows recent updates.
 ## Step 3 - Build your connector URL
 
 ```
-https://simple-tg-chat-mcp.vercel.app/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>
+https://<your-service>.onrender.com/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>
 ```
 
-Replace `<BOT_TOKEN>` and `<CHAT_ID>` with the values from steps 1-2. That's
-the whole configuration - keep this URL private, since anyone who has it can
-send messages through your bot.
+Replace `<your-service>` with your deployment's subdomain (see
+[Deploying your own copy](#deploying-your-own-copy)), and `<BOT_TOKEN>` /
+`<CHAT_ID>` with the values from steps 1-2. That's the whole configuration -
+keep this URL private, since anyone who has it can send messages through your
+bot.
 
 ## Step 4 - Connect it to Claude
 
@@ -88,7 +88,7 @@ send messages through your bot.
 
 **Claude Code (CLI)**
 ```
-claude mcp add --transport http -s user Telegram "https://simple-tg-chat-mcp.vercel.app/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>"
+claude mcp add --transport http -s user Telegram "https://<your-service>.onrender.com/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>"
 ```
 Here `--transport http` selects the HTTP transport; `-s user` registers it
 globally (available in every project) instead of just the current one;
@@ -162,20 +162,37 @@ as a raw stack trace.
 
 ## Deploying your own copy
 
-Want your own instance instead of the shared one above (e.g. to set an
-access key, or just to run your own infrastructure)?
+This runs as a persistent Node server rather than a serverless function -
+required so large base64 file uploads (photos, documents) aren't truncated by
+a serverless request-body cap. [Render](https://render.com)'s free tier fits:
+it's a real always-on process (no small body-size limit like Lambda-based
+serverless hosts impose), gives you a free `*.onrender.com` subdomain, and
+deploys automatically from GitHub.
 
 1. Fork or clone this repo.
-2. Import it into [Vercel](https://vercel.com/new) (Next.js is auto-detected;
-   no environment variables are required).
-3. *(Optional)* To restrict who can call your endpoint, set an environment
-   variable on the Vercel project:
+2. On [Render](https://render.com), click **New +** → **Blueprint**, connect
+   your GitHub account, and select your fork. Render reads `render.yaml` at
+   the repo root and creates the web service (free plan, Node, health check
+   at `/api/health`) automatically.
+   - Alternatively: **New +** → **Web Service** → connect the repo manually,
+     with build command `npm install && npm run build` and start command
+     `npm run start`.
+3. In the service's **Settings**, confirm **Auto-Deploy** is set to `Yes` (on
+   by default for GitHub-connected services) - every push to your default
+   branch then redeploys automatically.
+4. *(Optional)* To restrict who can call your endpoint, set an environment
+   variable on the Render service:
    - `MCP_ACCESS_KEY` - any secret string you choose. If set, every request
      must include a matching `&key=...` query parameter or the server
      returns 401. Leave it unset to allow any request that carries a valid
-     bot token (the default for the shared instance above).
-4. Use `https://<your-deployment>.vercel.app/api/mcp?token=...&chat=...` (plus
+     bot token.
+5. Use `https://<your-service>.onrender.com/api/mcp?token=...&chat=...` (plus
    `&key=...` if you set one) as your connector URL.
+6. *(Optional but recommended)* Render's free tier spins the service down
+   after ~15 minutes of inactivity; the next request then takes ~30-60s to
+   wake it back up. To avoid that delay, set up a free external cron (e.g.
+   [cron-job.org](https://cron-job.org)) to `GET
+   https://<your-service>.onrender.com/api/health` every 10-14 minutes.
 
 ## Local development
 
@@ -197,8 +214,8 @@ curl -X POST "http://localhost:3000/api/mcp?token=<BOT_TOKEN>&chat=<CHAT_ID>" \
 
 ## Tech stack
 
-Next.js (App Router) on Vercel, [`mcp-handler`](https://github.com/vercel/mcp-handler)
-(the official Vercel MCP adapter), TypeScript, Zod.
+Next.js (App Router) on [Render](https://render.com), [`mcp-handler`](https://github.com/vercel/mcp-handler)
+(Vercel's MCP adapter, host-agnostic), TypeScript, Zod.
 
 ## License
 

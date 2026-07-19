@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: simple-tg-chat-mcp
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: MCP_ACCESS_KEY
+        sync: false
