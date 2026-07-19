@@ -102,10 +102,8 @@ separate argument.
 ## Available tools
 
 `media` (used by several tools below) accepts one of:
-- `{ "url": "https://..." }` - Telegram fetches the file itself
-- `{ "base64": "...", "filename": "...", "mime": "..." }` - raw file bytes, uploaded directly. Only
-  for small files (under ~300 KB) - see [Uploading large files](#uploading-large-files) below for
-  anything bigger.
+- `{ "url": "https://..." }` - a public URL, or the URL returned by uploading a local file first
+  (see [Sending files](#sending-files) below)
 - `{ "file_id": "..." }` - reuse a file Telegram already has
 
 `parse_mode` (used by several tools below) is one of `MarkdownV2` (default),
@@ -162,15 +160,13 @@ Errors from Telegram (invalid token, rate limits, bad chat id, etc.) come
 back as a readable message like `Telegram error 400: chat not found`, never
 as a raw stack trace.
 
-## Uploading large files
+## Sending files
 
-Passing a file's bytes through the `base64` field costs output tokens - the
-model has to generate the entire base64 string as part of the tool call
-(a 5 MB photo is ~6.7M characters), which is slow regardless of hosting.
-
-If your MCP client has shell/file access (e.g. **Claude Code**), skip that
-entirely: upload the file directly from disk, outside the model's output
-stream, and pass the resulting URL instead:
+There's no way to inline a local file's bytes into a tool call - the model
+would have to generate the whole file as output tokens (a 5 MB photo is
+~6.7M characters), which is slow no matter the size. Instead, any MCP client
+with shell/file access (e.g. **Claude Code**) uploads the file directly from
+disk, outside the model's output stream, and passes the resulting URL:
 
 ```
 curl -F file=@<local-path> "https://<your-service>.onrender.com/api/upload"
@@ -195,15 +191,15 @@ uploading (e.g. with `ffmpeg`/`imagemagick`), or use `send_document` instead,
 if you hit this.
 
 This only works when the calling Claude can run shell commands against a
-local file. In shell-less clients (Claude.ai web/Desktop without Bash),
-there's no way around `base64` for large files - it's a client-capability
-limit, not something this server can fix.
+local file. Shell-less clients (Claude.ai web/Desktop without Bash) can only
+send files already reachable by public `url` or an existing `file_id` - a
+client-capability limit, not something this server can fix.
 
 ## Deploying your own copy
 
 This runs as a persistent Node server rather than a serverless function -
-required so large base64 file uploads (photos, documents) aren't truncated by
-a serverless request-body cap. [Render](https://render.com)'s free tier fits:
+required so large file uploads to `/api/upload` (photos, documents) aren't
+truncated by a serverless request-body cap. [Render](https://render.com)'s free tier fits:
 it's a real always-on process (no small body-size limit like Lambda-based
 serverless hosts impose), gives you a free `*.onrender.com` subdomain, and
 deploys automatically from GitHub.

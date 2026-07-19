@@ -12,36 +12,26 @@ const parseModeSchema = z
   .default("MarkdownV2")
   .describe("Text formatting mode. 'none' sends plain text.");
 
-// Built per-request (in buildHandler) so the base64 field's description can
+// Built per-request (in buildHandler) so the url field's description can
 // embed the concrete upload URL/curl command directly - not every MCP client
 // surfaces the server-level `instructions` field, so this is the fallback
 // that's always visible wherever the tool schema itself is shown.
 function buildMediaInputSchema(uploadUrl: string) {
   return z
     .union([
-      z.object({ url: z.string().url() }).describe("Fetch the file from a public URL"),
       z
-        .object({
-          base64: z.string(),
-          filename: z.string().optional(),
-          mime: z.string().optional(),
-        })
+        .object({ url: z.string().url() })
         .describe(
-          "Upload raw file content, base64-encoded. Only for small files (under ~300 KB) - " +
-            "for anything larger, this is slow (it makes the model generate the whole file as " +
-            "output tokens). Instead, if you have shell/file access, run " +
-            `\`curl -F file=@<local-path> "${uploadUrl}"\`, which returns { "url": "..." }, ` +
-            "and pass that via the 'url' field instead."
+          "A public URL, or the URL returned by uploading a local file first: " +
+            `\`curl -F file=@<local-path> "${uploadUrl}"\` returns { "url": "..." } - pass that here.`
         ),
       z.object({ file_id: z.string() }).describe("Reuse a file_id already known to Telegram"),
     ])
-    .describe("The file/photo/media content, given one of three ways");
+    .describe(
+      "The file/photo/media content. For a local file, upload it first via curl, then pass the " +
+        "returned URL - do not attempt to inline file bytes."
+    );
 }
-
-// Above this, base64 is rejected in favor of the out-of-band upload flow -
-// prose guidance alone is unreliable, so this is enforced as a hard runtime
-// guard with a corrective error (see mediaTool below).
-const BASE64_INLINE_LIMIT = 400_000; // chars, ~300 KB of binary
 
 const commonSendFields = {
   reply_to_message_id: z.number().int().optional(),
@@ -120,14 +110,12 @@ function uploadUrlFor(req: Request): string {
 // below, for clients that don't surface `instructions` prominently.
 function uploadInstructions(uploadUrl: string): string {
   return (
-    "For files larger than ~300 KB, do NOT pass raw bytes via the 'base64' media field - " +
-    "that forces you to generate the whole file as output tokens, which is slow. Instead, " +
-    "if you have shell/file access, upload the file out-of-band first:\n\n" +
+    "To send a local file, upload it out-of-band first (never inline file bytes in a tool call):\n\n" +
     `  curl -F file=@<local-path> "${uploadUrl}"\n\n` +
     "This returns { \"url\": \"...\" }. Pass that URL via the media 'url' field on " +
     "send_photo/send_document/send_video/etc. Uploaded files expire after 5 minutes and " +
-    "are capped at 50 MB (Telegram's send limit). This trick only works when you can run " +
-    "shell commands against a local file - in shell-less clients, base64 is unavoidable."
+    "are capped at 50 MB (Telegram's send limit). This requires shell/file access; in " +
+    "shell-less clients, only a public 'url' or an existing 'file_id' can be sent."
   );
 }
 
@@ -259,8 +247,8 @@ async function buildHandler(token: string, chat: string, req: Request) {
             description:
               `${description}` +
               (withCaption ? " Caption max 1024 characters." : "") +
-              ` For files over ~300 KB, don't use base64 - run ` +
-              `\`curl -F file=@<local-path> "${uploadUrl}"\` and pass the returned URL via 'media.url' instead.`,
+              ` To send a local file, first upload it - run ` +
+              `\`curl -F file=@<local-path> "${uploadUrl}"\` - then pass the returned URL via 'media.url'.`,
             inputSchema: {
               media: mediaInputSchema,
               ...(withCaption
@@ -270,21 +258,6 @@ async function buildHandler(token: string, chat: string, req: Request) {
             },
           },
           async (args: any) => {
-            if (args.media?.base64 && args.media.base64.length > BASE64_INLINE_LIMIT) {
-              return {
-                isError: true,
-                content: [
-                  {
-                    type: "text" as const,
-                    text:
-                      `This base64 payload is ${args.media.base64.length} chars, over the ` +
-                      `${BASE64_INLINE_LIMIT}-char inline limit. Upload it out-of-band instead:\n\n` +
-                      uploadInstructions(uploadUrl) +
-                      `\n\nThen call this tool again with { "media": { "url": "<returned url>" } }.`,
-                  },
-                ],
-              };
-            }
             return toResult(
               await callApiWithMedia(
                 token,
@@ -356,7 +329,8 @@ async function buildHandler(token: string, chat: string, req: Request) {
           title: "Send Media Group",
           description:
             "Send an album of 2-10 photos/videos in one message. Photo/video only (no documents/audio); " +
-            "caption max 1024 characters per item.",
+            "caption max 1024 characters per item. Each 'url' must be public, or the URL returned by " +
+            `uploading a local file first: \`curl -F file=@<local-path> "${uploadUrl}"\`.`,
           inputSchema: {
             items: z
               .array(

@@ -2,10 +2,7 @@
 // error text, and an automatic plain-text retry when parse_mode formatting
 // is rejected by Telegram (so the message still gets delivered).
 
-export type MediaInput =
-  | { url: string }
-  | { base64: string; filename?: string; mime?: string }
-  | { file_id: string };
+export type MediaInput = { url: string } | { file_id: string };
 
 export interface TgResult {
   ok: boolean;
@@ -163,20 +160,8 @@ export async function callApi(
   return { ok: false, text: describeError(body) };
 }
 
-// Node's base64 decoder silently ignores non-alphabet characters instead of
-// erroring, so a stray "data:image/png;base64," prefix doesn't fail loudly -
-// it decodes into garbage bytes. Strip it if present.
-function stripDataUriPrefix(b64: string): string {
-  const match = /^data:[^;]+;base64,/.exec(b64);
-  return match ? b64.slice(match[0].length) : b64;
-}
-
-async function mediaToPart(input: MediaInput): Promise<{ value: string | Blob; filename?: string }> {
-  if ("url" in input) return { value: input.url };
-  if ("file_id" in input) return { value: input.file_id };
-  const buf = Buffer.from(stripDataUriPrefix(input.base64), "base64");
-  const blob = new Blob([buf], { type: input.mime ?? "application/octet-stream" });
-  return { value: blob, filename: input.filename ?? "file" };
+function mediaValue(input: MediaInput): string {
+  return "url" in input ? input.url : input.file_id;
 }
 
 export async function callApiWithMedia(
@@ -186,55 +171,7 @@ export async function callApiWithMedia(
   mediaField: string,
   media: MediaInput
 ): Promise<TgResult> {
-  const part = await mediaToPart(media);
-
-  // Simple case: URL or file_id can go through the plain JSON endpoint.
-  if (typeof part.value === "string") {
-    return callApi(token, method, { ...fields, [mediaField]: part.value });
-  }
-
-  const form = new FormData();
-  for (const [key, value] of Object.entries(fields)) {
-    if (value === undefined || value === null) continue;
-    form.append(key, String(value));
-  }
-  form.append(mediaField, part.value, part.filename);
-
-  let body: any;
-  try {
-    const res = await fetch(apiUrl(token, method), { method: "POST", body: form });
-    body = await res.json();
-  } catch (err: any) {
-    return { ok: false, text: `Network error calling Telegram: ${err.message ?? err}` };
-  }
-
-  if (body.ok) return { ok: true, text: "OK", raw: body.result };
-
-  if (isParseEntitiesError(body) && fields.parse_mode) {
-    const retryForm = new FormData();
-    for (const [key, value] of Object.entries(fields)) {
-      if (key === "parse_mode" || value === undefined || value === null) continue;
-      retryForm.append(key, String(value));
-    }
-    retryForm.append(mediaField, part.value, part.filename);
-    let retryBody: any;
-    try {
-      const res = await fetch(apiUrl(token, method), { method: "POST", body: retryForm });
-      retryBody = await res.json();
-    } catch (err: any) {
-      return { ok: false, text: `Network error calling Telegram: ${err.message ?? err}` };
-    }
-    if (retryBody.ok) {
-      return {
-        ok: true,
-        text: "OK (formatting was invalid, so it was sent as plain text instead)",
-        raw: retryBody.result,
-      };
-    }
-    return { ok: false, text: describeError(retryBody) };
-  }
-
-  return { ok: false, text: describeError(body) };
+  return callApi(token, method, { ...fields, [mediaField]: mediaValue(media) });
 }
 
 const EXT_MIME: Record<string, string> = {
