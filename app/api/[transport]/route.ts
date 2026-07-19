@@ -1,6 +1,7 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import { callApi, callApiWithMedia, downloadFile, type MediaInput } from "@/lib/telegram";
+import { uploadBaseUrl, uploadToken } from "@/lib/upload";
 
 export const maxDuration = 60;
 
@@ -20,10 +21,21 @@ const mediaInputSchema = z
         filename: z.string().optional(),
         mime: z.string().optional(),
       })
-      .describe("Upload raw file content, base64-encoded"),
+      .describe(
+        "Upload raw file content, base64-encoded. Only for small files (under ~300 KB) - " +
+          "for anything larger, upload the file out-of-band first (see server instructions " +
+          "for the curl command) and pass the resulting URL via the 'url' field instead. " +
+          "Embedding large base64 here is slow: it makes the model generate the whole file " +
+          "as output tokens."
+      ),
     z.object({ file_id: z.string() }).describe("Reuse a file_id already known to Telegram"),
   ])
   .describe("The file/photo/media content, given one of three ways");
+
+// Above this, base64 is rejected in favor of the out-of-band upload flow -
+// prose guidance alone is unreliable, so this is enforced as a hard runtime
+// guard with a corrective error (see mediaTool below).
+const BASE64_INLINE_LIMIT = 400_000; // chars, ~300 KB of binary
 
 const commonSendFields = {
   reply_to_message_id: z.number().int().optional(),
@@ -88,7 +100,27 @@ function summarizeUpdate(u: any) {
 
 // --- Route handler ------------------------------------------------------------
 
-async function buildHandler(token: string, chat: string) {
+// Builds the curl command clients with shell/file access (e.g. Claude Code)
+// should use to upload large files out-of-band, bypassing the token cost of
+// embedding raw bytes as base64 in a tool call. See CLAUDE.md for the full
+// rationale.
+function uploadInstructions(req: Request): string {
+  const base = uploadBaseUrl(req);
+  const t = uploadToken();
+  const uploadUrl = `${base}/api/upload${t ? `?u=${t}` : ""}`;
+  return (
+    "For files larger than ~300 KB, do NOT pass raw bytes via the 'base64' media field - " +
+    "that forces you to generate the whole file as output tokens, which is slow. Instead, " +
+    "if you have shell/file access, upload the file out-of-band first:\n\n" +
+    `  curl -F file=@<local-path> "${uploadUrl}"\n\n` +
+    "This returns { \"url\": \"...\" }. Pass that URL via the media 'url' field on " +
+    "send_photo/send_document/send_video/etc. Uploaded files expire after 5 minutes and " +
+    "are capped at 50 MB (Telegram's send limit). This trick only works when you can run " +
+    "shell commands against a local file - in shell-less clients, base64 is unavoidable."
+  );
+}
+
+async function buildHandler(token: string, chat: string, req: Request) {
   return createMcpHandler(
     (server) => {
       server.registerTool(
@@ -211,7 +243,7 @@ async function buildHandler(token: string, chat: string) {
           {
             ...WRITE,
             title,
-            description,
+            description: `${description} For files over ~300 KB, see the 'media' base64 field's own description.`,
             inputSchema: {
               media: mediaInputSchema,
               ...(withCaption
@@ -220,8 +252,23 @@ async function buildHandler(token: string, chat: string) {
               ...commonSendFields,
             },
           },
-          async (args: any) =>
-            toResult(
+          async (args: any) => {
+            if (args.media?.base64 && args.media.base64.length > BASE64_INLINE_LIMIT) {
+              return {
+                isError: true,
+                content: [
+                  {
+                    type: "text" as const,
+                    text:
+                      `This base64 payload is ${args.media.base64.length} chars, over the ` +
+                      `${BASE64_INLINE_LIMIT}-char inline limit. Upload it out-of-band instead:\n\n` +
+                      uploadInstructions(req) +
+                      `\n\nThen call this tool again with { "media": { "url": "<returned url>" } }.`,
+                  },
+                ],
+              };
+            }
+            return toResult(
               await callApiWithMedia(
                 token,
                 method,
@@ -235,7 +282,8 @@ async function buildHandler(token: string, chat: string) {
                 field,
                 args.media as MediaInput
               )
-            )
+            );
+          }
         );
       };
 
@@ -612,6 +660,7 @@ async function buildHandler(token: string, chat: string) {
     {
       serverInfo: { name: "SimpleTgChatMcp", version: "1.0.0" },
       capabilities: { tools: {} },
+      instructions: uploadInstructions(req),
     },
     { basePath: "/api", maxDuration: 60 }
   );
@@ -641,7 +690,7 @@ async function handle(req: Request) {
     );
   }
 
-  const handler = await buildHandler(token, chat);
+  const handler = await buildHandler(token, chat, req);
   return handler(req);
 }
 

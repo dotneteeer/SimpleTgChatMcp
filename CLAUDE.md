@@ -28,6 +28,25 @@ the free tier's ~15-min idle spin-down). `export const maxDuration = 60` in
   text if Telegram rejects the message due to bad `parse_mode` entities.
 - `lib/mdv2.ts` - `escapeMarkdownV2()` helper (not used by tools directly, but
   exported for callers who want to send literal text safely).
+- `lib/upload.ts` + `app/api/upload/route.ts` + `app/api/file/[id]/route.ts` -
+  out-of-band file upload, deliberately plain HTTP, not an MCP tool. Rationale:
+  base64 in a tool call costs output tokens (the model generates the whole
+  file as text), independent of hosting - a hypothetical "upload" MCP tool
+  would have the same problem, since the bytes still have to enter the
+  model's output. Instead, a shell-capable client (Claude Code) runs
+  `curl -F file=@<path> .../api/upload` to move bytes straight from disk,
+  gets back a URL, and passes that to the existing `media.url` field - no
+  send-side schema change needed. Storage is an in-memory `Map` (5-min TTL,
+  200 MB total cap) since files only need to survive until Telegram fetches
+  them; not persisted, no external object store. Upload auth is an
+  HMAC-SHA256(`MCP_ACCESS_KEY`, "upload-v1") token (`?u=`), not `token`/`chat`,
+  because the model never sees those - they live in the connector URL, hidden
+  from the model. The upload URL+token reaches the model via the MCP
+  `instructions` field (set from `uploadInstructions()` in `route.ts`,
+  `serverOptions.instructions` - `mcp-handler` passes it through to the SDK).
+  Only works in shell-capable clients; base64 remains the only option in
+  shell-less ones (Claude.ai web/Desktop) - a client-capability limit, not
+  fixable server-side. Telegram's send cap (any method) is 50 MB.
 
 Bots can't browse arbitrary chat history - they only see messages that
 arrive after they start looking. `get_updates` wraps Telegram's `getUpdates`
@@ -48,6 +67,10 @@ those updates to actual bytes via `downloadFile()` in `lib/telegram.ts`.
   there's a text/caption field.
 - Media-accepting tools use the shared `mediaInputSchema` union
   (`url` | `base64` | `file_id`) - keep new media tools consistent with this.
+- `mediaTool()` in `route.ts` hard-rejects `base64` payloads over
+  `BASE64_INLINE_LIMIT` (400k chars) with a corrective error pointing at the
+  upload flow above - prose-only guidance in descriptions isn't reliable
+  enough on its own, so this backs it with an enforced failure.
 
 ## Adding a new Bot API method
 

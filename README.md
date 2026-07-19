@@ -103,7 +103,9 @@ separate argument.
 
 `media` (used by several tools below) accepts one of:
 - `{ "url": "https://..." }` - Telegram fetches the file itself
-- `{ "base64": "...", "filename": "...", "mime": "..." }` - raw file bytes, uploaded directly
+- `{ "base64": "...", "filename": "...", "mime": "..." }` - raw file bytes, uploaded directly. Only
+  for small files (under ~300 KB) - see [Uploading large files](#uploading-large-files) below for
+  anything bigger.
 - `{ "file_id": "..." }` - reuse a file Telegram already has
 
 `parse_mode` (used by several tools below) is one of `MarkdownV2` (default),
@@ -159,6 +161,34 @@ for new incoming text, files, locations, polls, etc.
 Errors from Telegram (invalid token, rate limits, bad chat id, etc.) come
 back as a readable message like `Telegram error 400: chat not found`, never
 as a raw stack trace.
+
+## Uploading large files
+
+Passing a file's bytes through the `base64` field costs output tokens - the
+model has to generate the entire base64 string as part of the tool call
+(a 5 MB photo is ~6.7M characters), which is slow regardless of hosting.
+
+If your MCP client has shell/file access (e.g. **Claude Code**), skip that
+entirely: upload the file directly from disk, outside the model's output
+stream, and pass the resulting URL instead:
+
+```
+curl -F file=@<local-path> "https://<your-service>.onrender.com/api/upload"
+```
+
+This returns `{ "url": "..." }`. Pass that URL via the `url` field of `media`
+on `send_photo`/`send_document`/etc. Uploaded files are held in memory for
+**5 minutes** (enough time for Telegram to fetch them) and capped at **50 MB**
+(Telegram's send-size limit for any method). If you set `MCP_ACCESS_KEY` (see
+below), the upload URL needs a `?u=<token>` derived from it - the exact URL,
+including the token, is included in the MCP server's `instructions` field
+that connected clients receive automatically, and in each media tool's
+description as a fallback for clients that don't surface `instructions`.
+
+This only works when the calling Claude can run shell commands against a
+local file. In shell-less clients (Claude.ai web/Desktop without Bash),
+there's no way around `base64` for large files - it's a client-capability
+limit, not something this server can fix.
 
 ## Deploying your own copy
 
