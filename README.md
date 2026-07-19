@@ -185,6 +185,14 @@ including the token, is included in the MCP server's `instructions` field
 that connected clients receive automatically, and in each media tool's
 description as a fallback for clients that don't surface `instructions`.
 
+**Very high-resolution photos** (width + height over ~10,000px - common with
+full-size stock/camera photos) get rejected by Telegram itself with `Bad
+Request: failed to get HTTP URL content` on `send_photo`, and a similar
+`wrong type of the web page content` on `send_document` - this is Telegram's
+own media-dimension limit, confirmed by testing at the pixel level, not a
+hosting or upload-endpoint issue. Downscale the image before uploading (e.g.
+with `ffmpeg`/`imagemagick`) if you hit this.
+
 This only works when the calling Claude can run shell commands against a
 local file. In shell-less clients (Claude.ai web/Desktop without Bash),
 there's no way around `base64` for large files - it's a client-capability

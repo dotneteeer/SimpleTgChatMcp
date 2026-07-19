@@ -38,10 +38,6 @@ export async function POST(req: Request) {
     return Response.json({ error: err.message ?? "Upload failed." }, { status: 503 });
   }
 
-  // TEMPORARY: correlates with [file-fetch] logs to check the delay between
-  // upload and Telegram's actual fetch. Remove once resolved.
-  console.log(`[upload] ${new Date().toISOString()} id=${id} mime=${mime} size=${bytes.length}`);
-
   return Response.json({
     url: `${uploadBaseUrl(req)}/api/file/${id}`,
     id,

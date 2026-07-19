@@ -47,6 +47,23 @@ the free tier's ~15-min idle spin-down). `export const maxDuration = 60` in
   Only works in shell-capable clients; base64 remains the only option in
   shell-less ones (Claude.ai web/Desktop) - a client-capability limit, not
   fixable server-side. Telegram's send cap (any method) is 50 MB.
+  `/api/file/[id]` supports HTTP Range requests (206/Content-Range/416) -
+  needed because Telegram's media fetcher (and others) can probe with a
+  Range request before downloading in full.
+
+  Debugged-and-closed false leads, so they aren't re-investigated cold: a
+  `send_photo`/`send_document` URL failure ("failed to get HTTP URL
+  content" / "wrong type of the web page content") was NOT a Cloudflare
+  edge block in front of Render's shared `onrender.com` domain (verified by
+  logging - Telegram's real fetcher, from a genuine Telegram IP, does reach
+  this origin) and NOT missing Range support (fixed anyway, since it's
+  correct behavior, but didn't resolve the failure). Root cause: Telegram
+  itself rejects images whose width + height exceeds ~10,000px, for both
+  `sendPhoto` and `sendDocument` (confirmed by testing a flat-color PNG at
+  7200x4800, sum=12000 - fails; well under that threshold - succeeds even
+  at 1MB+). This is a Telegram API limit on the photo, unrelated to hosting.
+  No server-side fix exists without adding image-resizing (out of scope);
+  documented in README.md as a caveat.
 
 Bots can't browse arbitrary chat history - they only see messages that
 arrive after they start looking. `get_updates` wraps Telegram's `getUpdates`
