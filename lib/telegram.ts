@@ -95,10 +95,18 @@ export async function callApi(
   return { ok: false, text: describeError(body) };
 }
 
+// Node's base64 decoder silently ignores non-alphabet characters instead of
+// erroring, so a stray "data:image/png;base64," prefix doesn't fail loudly -
+// it decodes into garbage bytes. Strip it if present.
+function stripDataUriPrefix(b64: string): string {
+  const match = /^data:[^;]+;base64,/.exec(b64);
+  return match ? b64.slice(match[0].length) : b64;
+}
+
 async function mediaToPart(input: MediaInput): Promise<{ value: string | Blob; filename?: string }> {
   if ("url" in input) return { value: input.url };
   if ("file_id" in input) return { value: input.file_id };
-  const buf = Buffer.from(input.base64, "base64");
+  const buf = Buffer.from(stripDataUriPrefix(input.base64), "base64");
   const blob = new Blob([buf], { type: input.mime ?? "application/octet-stream" });
   return { value: blob, filename: input.filename ?? "file" };
 }
