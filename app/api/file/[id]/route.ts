@@ -8,6 +8,12 @@ export const runtime = "nodejs";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  // TEMPORARY: diagnosing whether Telegram's URL-fetcher reaches this origin
+  // at all, or is stopped upstream (e.g. by Render's Cloudflare edge). Remove
+  // once the "failed to get HTTP URL content" issue is resolved.
+  console.log(
+    `[file-fetch] ${new Date().toISOString()} id=${id} ua=${req.headers.get("user-agent")} range=${req.headers.get("range")} ip=${req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for")}`
+  );
   const entry = getUpload(id);
   if (!entry) {
     return new Response("Not found or expired.", { status: 404 });
