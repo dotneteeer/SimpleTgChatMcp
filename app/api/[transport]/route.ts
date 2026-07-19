@@ -12,25 +12,31 @@ const parseModeSchema = z
   .default("MarkdownV2")
   .describe("Text formatting mode. 'none' sends plain text.");
 
-const mediaInputSchema = z
-  .union([
-    z.object({ url: z.string().url() }).describe("Fetch the file from a public URL"),
-    z
-      .object({
-        base64: z.string(),
-        filename: z.string().optional(),
-        mime: z.string().optional(),
-      })
-      .describe(
-        "Upload raw file content, base64-encoded. Only for small files (under ~300 KB) - " +
-          "for anything larger, upload the file out-of-band first (see server instructions " +
-          "for the curl command) and pass the resulting URL via the 'url' field instead. " +
-          "Embedding large base64 here is slow: it makes the model generate the whole file " +
-          "as output tokens."
-      ),
-    z.object({ file_id: z.string() }).describe("Reuse a file_id already known to Telegram"),
-  ])
-  .describe("The file/photo/media content, given one of three ways");
+// Built per-request (in buildHandler) so the base64 field's description can
+// embed the concrete upload URL/curl command directly - not every MCP client
+// surfaces the server-level `instructions` field, so this is the fallback
+// that's always visible wherever the tool schema itself is shown.
+function buildMediaInputSchema(uploadUrl: string) {
+  return z
+    .union([
+      z.object({ url: z.string().url() }).describe("Fetch the file from a public URL"),
+      z
+        .object({
+          base64: z.string(),
+          filename: z.string().optional(),
+          mime: z.string().optional(),
+        })
+        .describe(
+          "Upload raw file content, base64-encoded. Only for small files (under ~300 KB) - " +
+            "for anything larger, this is slow (it makes the model generate the whole file as " +
+            "output tokens). Instead, if you have shell/file access, run " +
+            `\`curl -F file=@<local-path> "${uploadUrl}"\`, which returns { "url": "..." }, ` +
+            "and pass that via the 'url' field instead."
+        ),
+      z.object({ file_id: z.string() }).describe("Reuse a file_id already known to Telegram"),
+    ])
+    .describe("The file/photo/media content, given one of three ways");
+}
 
 // Above this, base64 is rejected in favor of the out-of-band upload flow -
 // prose guidance alone is unreliable, so this is enforced as a hard runtime
@@ -100,14 +106,19 @@ function summarizeUpdate(u: any) {
 
 // --- Route handler ------------------------------------------------------------
 
-// Builds the curl command clients with shell/file access (e.g. Claude Code)
-// should use to upload large files out-of-band, bypassing the token cost of
-// embedding raw bytes as base64 in a tool call. See CLAUDE.md for the full
-// rationale.
-function uploadInstructions(req: Request): string {
+// The concrete URL (with signed token, if MCP_ACCESS_KEY is set) clients with
+// shell/file access (e.g. Claude Code) should curl a local file to, to upload
+// it out-of-band instead of embedding it as base64 in a tool call.
+function uploadUrlFor(req: Request): string {
   const base = uploadBaseUrl(req);
   const t = uploadToken();
-  const uploadUrl = `${base}/api/upload${t ? `?u=${t}` : ""}`;
+  return `${base}/api/upload${t ? `?u=${t}` : ""}`;
+}
+
+// Server-level `instructions` (MCP `initialize` response) - a secondary
+// channel to the same guidance embedded directly in tool/schema descriptions
+// below, for clients that don't surface `instructions` prominently.
+function uploadInstructions(uploadUrl: string): string {
   return (
     "For files larger than ~300 KB, do NOT pass raw bytes via the 'base64' media field - " +
     "that forces you to generate the whole file as output tokens, which is slow. Instead, " +
@@ -121,6 +132,8 @@ function uploadInstructions(req: Request): string {
 }
 
 async function buildHandler(token: string, chat: string, req: Request) {
+  const uploadUrl = uploadUrlFor(req);
+  const mediaInputSchema = buildMediaInputSchema(uploadUrl);
   return createMcpHandler(
     (server) => {
       server.registerTool(
@@ -243,7 +256,9 @@ async function buildHandler(token: string, chat: string, req: Request) {
           {
             ...WRITE,
             title,
-            description: `${description} For files over ~300 KB, see the 'media' base64 field's own description.`,
+            description:
+              `${description} For files over ~300 KB, don't use base64 - run ` +
+              `\`curl -F file=@<local-path> "${uploadUrl}"\` and pass the returned URL via 'media.url' instead.`,
             inputSchema: {
               media: mediaInputSchema,
               ...(withCaption
@@ -262,7 +277,7 @@ async function buildHandler(token: string, chat: string, req: Request) {
                     text:
                       `This base64 payload is ${args.media.base64.length} chars, over the ` +
                       `${BASE64_INLINE_LIMIT}-char inline limit. Upload it out-of-band instead:\n\n` +
-                      uploadInstructions(req) +
+                      uploadInstructions(uploadUrl) +
                       `\n\nThen call this tool again with { "media": { "url": "<returned url>" } }.`,
                   },
                 ],
@@ -660,7 +675,7 @@ async function buildHandler(token: string, chat: string, req: Request) {
     {
       serverInfo: { name: "SimpleTgChatMcp", version: "1.0.0" },
       capabilities: { tools: {} },
-      instructions: uploadInstructions(req),
+      instructions: uploadInstructions(uploadUrl),
     },
     { basePath: "/api", maxDuration: 60 }
   );
