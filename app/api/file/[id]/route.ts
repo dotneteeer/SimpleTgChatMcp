@@ -6,16 +6,47 @@ import { getUpload } from "@/lib/upload";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const entry = getUpload(id);
   if (!entry) {
     return new Response("Not found or expired.", { status: 404 });
   }
+
+  const total = entry.bytes.length;
+  const range = req.headers.get("range");
+  // Telegram (and other media fetchers) may probe with a Range request before
+  // downloading in full - answering with a plain 200 instead of a proper 206
+  // can cause the fetcher to reject the response as not being valid media.
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0;
+      const end = match[2] ? parseInt(match[2], 10) : total - 1;
+      if (start <= end && end < total) {
+        const slice = entry.bytes.subarray(start, end + 1);
+        return new Response(new Uint8Array(slice), {
+          status: 206,
+          headers: {
+            "Content-Type": entry.mime,
+            "Content-Length": String(slice.length),
+            "Content-Range": `bytes ${start}-${end}/${total}`,
+            "Accept-Ranges": "bytes",
+          },
+        });
+      }
+      return new Response(null, {
+        status: 416,
+        headers: { "Content-Range": `bytes */${total}`, "Accept-Ranges": "bytes" },
+      });
+    }
+  }
+
   return new Response(new Uint8Array(entry.bytes), {
     headers: {
       "Content-Type": entry.mime,
-      "Content-Length": String(entry.bytes.length),
+      "Content-Length": String(total),
+      "Accept-Ranges": "bytes",
     },
   });
 }
