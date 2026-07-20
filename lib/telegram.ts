@@ -17,14 +17,36 @@ function apiUrl(token: string, method: string): string {
 // Known Telegram error descriptions mapped to actionable hints - Telegram's raw
 // text is often too terse to self-correct from (e.g. "failed to get HTTP URL
 // content" actually means the photo's dimensions exceed Telegram's limit).
-const ERROR_HINTS: { pattern: RegExp; hint: string }[] = [
+const MEDIA_NOUN: Record<string, string> = {
+  sendPhoto: "photo",
+  sendDocument: "file",
+  sendVideo: "video",
+  sendAudio: "audio file",
+  sendVoice: "voice message",
+  sendAnimation: "animation",
+  sendMediaGroup: "media",
+};
+
+const ERROR_HINTS: { pattern: RegExp; hint: string | ((method?: string) => string) }[] = [
   {
     pattern: /failed to get http url content|wrong type of the web page content|IMAGE_PROCESS_FAILED|PHOTO_INVALID_DIMENSIONS/i,
-    hint:
-      "Telegram couldn't fetch/process this photo. Two known causes: (1) the url isn't publicly " +
-      "reachable or returned a non-image response - verify it loads directly in a browser with no auth; " +
-      "(2) the photo's width + height exceeds ~10,000px or its aspect ratio exceeds 20:1 - downscale it, " +
-      "or send it with send_document instead (no dimension limit).",
+    hint: (method?: string) => {
+      const noun = MEDIA_NOUN[method ?? ""] ?? "media";
+      const base =
+        `Telegram couldn't fetch/process this ${noun}. Likely the url isn't publicly reachable or ` +
+        "returned an unexpected response - verify it loads directly in a browser with no auth.";
+      if (method === "sendPhoto") {
+        return (
+          base +
+          " Also, Telegram rejects photos where width + height exceeds ~10,000px or the aspect ratio " +
+          "exceeds 20:1 - downscale it, or send it with send_document instead (no dimension limit)."
+        );
+      }
+      if (method === "sendDocument" || method === "sendMediaGroup") {
+        return base + " If it's an image, Telegram also rejects images whose width + height exceeds ~10,000px.";
+      }
+      return base;
+    },
   },
   {
     pattern: /file is too big/i,
@@ -48,7 +70,11 @@ const ERROR_HINTS: { pattern: RegExp; hint: string }[] = [
   },
   {
     pattern: /chat not found/i,
-    hint: "The configured chat id is wrong, or the bot was never started in / added to that chat.",
+    hint: (method?: string) =>
+      method === "forwardMessage" || method === "copyMessage"
+        ? "Either the configured chat id is wrong / the bot isn't in it, or the source 'from_chat_id' " +
+          "is wrong or unreadable by the bot."
+        : "The configured chat id is wrong, or the bot was never started in / added to that chat.",
   },
   {
     pattern: /not enough rights|have no rights|need administrator/i,
@@ -80,13 +106,14 @@ const ERROR_HINTS: { pattern: RegExp; hint: string }[] = [
   },
 ];
 
-function describeError(body: any): string {
+function describeError(body: any, method?: string): string {
   const code = body?.error_code ?? "unknown";
   const desc = body?.description ?? "Unknown error";
   const retryAfter = body?.parameters?.retry_after;
   let msg = `Telegram error ${code}: ${desc}`;
   if (retryAfter) msg += ` (retry after ${retryAfter}s)`;
-  const hint = ERROR_HINTS.find((h) => h.pattern.test(desc))?.hint;
+  const raw = ERROR_HINTS.find((h) => h.pattern.test(desc))?.hint;
+  const hint = typeof raw === "function" ? raw(method) : raw;
   if (hint) msg += `\nHint: ${hint}`;
   return msg;
 }
@@ -153,11 +180,11 @@ export async function callApi(
           raw: retryBody.result,
         };
       }
-      return { ok: false, text: describeError(retryBody) };
+      return { ok: false, text: describeError(retryBody, method) };
     }
   }
 
-  return { ok: false, text: describeError(body) };
+  return { ok: false, text: describeError(body, method) };
 }
 
 function mediaValue(input: MediaInput): string {
