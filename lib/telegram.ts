@@ -146,14 +146,17 @@ async function postJson(token: string, method: string, params: Record<string, un
   return res.json();
 }
 
-export async function callApi(
-  token: string,
+// Shared by callApi and callApiWithMediaBytes: checks ok, and on a
+// can't-parse-entities failure retries once via the same `send` with
+// parse_mode stripped.
+async function sendAndHandle(
   method: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  send: (p: Record<string, unknown>) => Promise<any>
 ): Promise<TgResult> {
   let body: any;
   try {
-    body = await postJson(token, method, params);
+    body = await send(params);
   } catch (err: any) {
     return { ok: false, text: `Network error calling Telegram: ${err.message ?? err}` };
   }
@@ -169,7 +172,7 @@ export async function callApi(
       delete plain.parse_mode;
       let retryBody: any;
       try {
-        retryBody = await postJson(token, method, plain);
+        retryBody = await send(plain);
       } catch (err: any) {
         return { ok: false, text: `Network error calling Telegram: ${err.message ?? err}` };
       }
@@ -187,6 +190,14 @@ export async function callApi(
   return { ok: false, text: describeError(body, method) };
 }
 
+export async function callApi(
+  token: string,
+  method: string,
+  params: Record<string, unknown>
+): Promise<TgResult> {
+  return sendAndHandle(method, params, (p) => postJson(token, method, p));
+}
+
 function mediaValue(input: MediaInput): string {
   return "url" in input ? input.url : input.file_id;
 }
@@ -199,6 +210,35 @@ export async function callApiWithMedia(
   media: MediaInput
 ): Promise<TgResult> {
   return callApi(token, method, { ...fields, [mediaField]: mediaValue(media) });
+}
+
+// Sends the file's bytes directly to Telegram as multipart/form-data instead
+// of a URL for Telegram to fetch. Needed for our own uploaded files: Telegram's
+// URL-fetch path for sendDocument/etc. accepts some Content-Types (image/*,
+// application/pdf, application/zip, video/*, application/json, ...) but
+// rejects others (application/octet-stream, application/x-msdownload,
+// text/plain) outright with "failed to get HTTP URL content" - confirmed by
+// testing, and fatal for arbitrary binaries like .bin/.exe/.dll. Uploading the
+// bytes directly sidesteps that Content-Type gate entirely.
+export async function callApiWithMediaBytes(
+  token: string,
+  method: string,
+  fields: Record<string, unknown>,
+  mediaField: string,
+  bytes: Buffer,
+  filename: string,
+  mime: string
+): Promise<TgResult> {
+  const send = async (params: Record<string, unknown>) => {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined) form.append(k, String(v));
+    }
+    form.append(mediaField, new Blob([new Uint8Array(bytes)], { type: mime }), filename);
+    const res = await fetch(apiUrl(token, method), { method: "POST", body: form });
+    return res.json();
+  };
+  return sendAndHandle(method, fields, send);
 }
 
 const EXT_MIME: Record<string, string> = {

@@ -1,7 +1,7 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { callApi, callApiWithMedia, downloadFile, type MediaInput } from "@/lib/telegram";
-import { uploadBaseUrl, uploadToken } from "@/lib/upload";
+import { callApi, callApiWithMedia, callApiWithMediaBytes, downloadFile, type MediaInput } from "@/lib/telegram";
+import { getUpload, ownUploadId, uploadBaseUrl, uploadToken } from "@/lib/upload";
 
 export const maxDuration = 60;
 
@@ -258,21 +258,28 @@ async function buildHandler(token: string, chat: string, req: Request) {
             },
           },
           async (args: any) => {
-            return toResult(
-              await callApiWithMedia(
-                token,
-                method,
-                clean({
-                  chat_id: chat,
-                  caption: args.caption,
-                  parse_mode: withCaption ? pm(args.parse_mode) : undefined,
-                  reply_to_message_id: args.reply_to_message_id,
-                  disable_notification: args.disable_notification,
-                }),
-                field,
-                args.media as MediaInput
-              )
-            );
+            const media = args.media as MediaInput;
+            const fields = clean({
+              chat_id: chat,
+              caption: args.caption,
+              parse_mode: withCaption ? pm(args.parse_mode) : undefined,
+              reply_to_message_id: args.reply_to_message_id,
+              disable_notification: args.disable_notification,
+            });
+
+            // Route our own upload URLs through a direct multipart send instead
+            // of a URL fetch - see callApiWithMediaBytes for why.
+            if ("url" in media) {
+              const id = ownUploadId(media.url, req);
+              const entry = id ? getUpload(id) : undefined;
+              if (entry) {
+                return toResult(
+                  await callApiWithMediaBytes(token, method, fields, field, entry.bytes, entry.filename, entry.mime)
+                );
+              }
+            }
+
+            return toResult(await callApiWithMedia(token, method, fields, field, media));
           }
         );
       };

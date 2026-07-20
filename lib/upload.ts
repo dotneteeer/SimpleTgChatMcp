@@ -72,3 +72,19 @@ export function verifyUploadToken(provided: string | null): boolean {
 export function uploadBaseUrl(req: Request): string {
   return process.env.RENDER_EXTERNAL_URL ?? new URL(req.url).origin;
 }
+
+// If `url` is one of our own /api/file/<id>[/filename] upload URLs, returns
+// the id; otherwise null. Used to route our own uploads through a direct
+// multipart send to Telegram instead of a URL fetch - see
+// callApiWithMediaBytes in lib/telegram.ts for why.
+export function ownUploadId(url: string, req: Request): string | null {
+  try {
+    const u = new URL(url);
+    const base = new URL(uploadBaseUrl(req));
+    if (u.host !== base.host) return null;
+    const m = /^\/api\/file\/([0-9a-f]+)(?:\/.*)?$/.exec(u.pathname);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}

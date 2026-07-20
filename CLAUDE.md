@@ -23,18 +23,33 @@ the free tier's ~15-min idle spin-down). `export const maxDuration = 60` in
   builds a fresh `createMcpHandler` per request with `token`/`chat` captured
   in tool closures.
 - `lib/telegram.ts` - Bot API client. `callApi` for JSON calls, `callApiWithMedia`
-  for methods that send a file (media is always a URL or file_id, so this is a
-  thin wrapper around `callApi`). Both auto-retry once as plain text if
-  Telegram rejects the message due to bad `parse_mode` entities.
+  for methods that send a file by URL/`file_id` (thin wrapper around `callApi`),
+  `callApiWithMediaBytes` for sending file bytes directly as multipart instead
+  of a URL. All three auto-retry once as plain text if Telegram rejects the
+  message due to bad `parse_mode` entities.
 - `lib/mdv2.ts` - `escapeMarkdownV2()` helper (not used by tools directly, but
   exported for callers who want to send literal text safely).
-- `lib/upload.ts` + `app/api/upload/route.ts` + `app/api/file/[id]/route.ts` -
+- `lib/upload.ts` + `app/api/upload/route.ts` +
+  `app/api/file/[id]/route.ts` + `app/api/file/[id]/[filename]/route.ts` -
   out-of-band file upload, deliberately plain HTTP, not an MCP tool, and the
   *only* way to send a local file - inline base64 was removed from the media
   schema entirely (it costs output tokens regardless of file size, since the
   model has to generate the whole file as text; a hypothetical "upload" MCP
   tool would have the same problem, since the bytes still have to enter the
-  model's output). A shell-capable client (Claude Code) runs
+  model's output). The upload URL includes the filename (`/api/file/<id>/<name>`;
+  the bare `/api/file/<id>` route still works for back-compat) and the response
+  carries a `Content-Disposition` header (`lib/serveUpload.ts`, shared by both
+  routes) - both needed because Telegram's sendDocument/sendPhoto URL-fetch path
+  rejects some Content-Types (`application/octet-stream`, `application/x-msdownload`,
+  `text/plain`, and others) outright with "failed to get HTTP URL content",
+  confirmed by testing arbitrary extension-less/generic-mime URLs, not just
+  ours - fatal for arbitrary binaries like `.bin`/`.exe`/`.dll`. Because of that,
+  `route.ts`'s media tools (`ownUploadId` in `lib/upload.ts`) detect when
+  `media.url` is one of our own upload URLs and, if the entry hasn't expired,
+  send the bytes straight to Telegram via `callApiWithMediaBytes` instead of
+  handing Telegram a URL to fetch - sidesteps the Content-Type gate entirely.
+  Only our own uploads get this treatment; other public URLs still go through
+  Telegram's URL fetch as before. A shell-capable client (Claude Code) runs
   `curl -F file=@<path> .../api/upload` to move bytes straight from disk,
   gets back a URL, and passes that to the existing `media.url` field. Storage
   is an in-memory `Map` (5-min TTL, 200 MB total cap) since files only need to
