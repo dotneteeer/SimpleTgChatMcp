@@ -38,8 +38,13 @@ export async function POST(req: Request) {
     return Response.json({ error: err.message ?? "Upload failed." }, { status: 503 });
   }
 
+  // Filename goes in the URL path itself, not just Content-Disposition -
+  // Telegram's sendDocument/sendPhoto URL fetcher rejects extension-less URLs
+  // outright with "failed to get HTTP URL content" (confirmed by testing
+  // arbitrary extension-less URLs, not just ours - see CLAUDE.md).
+  const safeName = encodeURIComponent(file.name || "file");
   return Response.json({
-    url: `${uploadBaseUrl(req)}/api/file/${id}`,
+    url: `${uploadBaseUrl(req)}/api/file/${id}/${safeName}`,
     id,
     expires_in: 300,
     mime,
