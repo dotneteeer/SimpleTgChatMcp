@@ -129,6 +129,11 @@ for new incoming text, files, locations, polls, etc.
 
 ### Sending
 
+Send/edit/copy/forward tools return `OK (message_id: N)` on success (a
+comma-separated list for `send_media_group`) - pass that id to
+`edit_message_text`, `delete_message`, `pin_message`, etc. right after
+sending, since `get_updates` never returns the bot's own messages.
+
 - **`get_me`** - no parameters. Checks that your bot token is valid and reachable.
 - **`send_message`** - `text` (string, required, max 4096 chars), `parse_mode`, `reply_to_message_id` (number), `disable_notification` (boolean)
 - **`send_photo`** - `media` (required), `caption` (string, max 1024 chars), `parse_mode`, `reply_to_message_id`, `disable_notification`. Telegram rejects photos where width + height > ~10,000px or aspect ratio > 20:1, and caps size at 10 MB - use `send_document` to preserve full resolution/size.

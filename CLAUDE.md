@@ -92,6 +92,10 @@ those updates to actual bytes via `downloadFile()` in `lib/telegram.ts`.
   `type:"image"` for `get_file` on image mimes) - Telegram API errors are
   turned into readable text (`Telegram error <code>: <description>`), never
   thrown as raw exceptions.
+- Send/edit/copy/forward tools append `(message_id: N)` (or a comma-
+  separated list for `send_media_group`) to the success text - lets the
+  model act on a message (edit/delete/pin) right after sending it, since
+  `get_updates` never returns the bot's own messages.
 - Every tool has an `annotations` object (`READ_ONLY`/`WRITE`/`DESTRUCTIVE`
   presets in `route.ts`) per the MCP tool annotations spec - `readOnlyHint`
   for read tools, `destructiveHint` only for `delete_message`.

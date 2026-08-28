@@ -1,6 +1,13 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { callApi, callApiWithMedia, callApiWithMediaBytes, downloadFile, type MediaInput } from "@/lib/telegram";
+import {
+  callApi,
+  callApiWithMedia,
+  callApiWithMediaBytes,
+  downloadFile,
+  type MediaInput,
+  type TgResult,
+} from "@/lib/telegram";
 import { getUpload, ownUploadId, uploadBaseUrl, uploadToken } from "@/lib/upload";
 
 export const maxDuration = 60;
@@ -44,9 +51,20 @@ const READ_ONLY = { annotations: { readOnlyHint: true, destructiveHint: false } 
 const WRITE = { annotations: { readOnlyHint: false, destructiveHint: false } };
 const DESTRUCTIVE = { annotations: { readOnlyHint: false, destructiveHint: true } };
 
-function toResult(r: { ok: boolean; text: string }) {
+// Telegram returns the created Message (or an array of them for media groups,
+// or a bare {message_id} for copyMessage) as the call result. Surface its id so
+// edit/delete/pin/forward can act on a message right after sending it - bots
+// can't look their own messages up via get_updates.
+function messageIds(raw: unknown): number[] {
+  const one = (m: any): number[] => (typeof m?.message_id === "number" ? [m.message_id] : []);
+  return Array.isArray(raw) ? raw.flatMap(one) : one(raw);
+}
+
+function toResult(r: TgResult) {
+  const ids = r.ok ? messageIds(r.raw) : [];
+  const text = ids.length ? `${r.text} (message_id: ${ids.join(", ")})` : r.text;
   return {
-    content: [{ type: "text" as const, text: r.text }],
+    content: [{ type: "text" as const, text }],
     isError: !r.ok,
   };
 }
